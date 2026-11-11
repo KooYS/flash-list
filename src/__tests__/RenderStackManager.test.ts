@@ -572,3 +572,107 @@ describe("RenderStackManager edge cases", () => {
     expect(finalKeysForCurrentItems).toEqual(["0", "1", "2", "3"]);
   });
 });
+
+describe("RenderStackManager with recycled keys outside the engaged range", () => {
+  const range = (count: number) => Array.from({ length: count }, (_, i) => i);
+  const toMock = (ids: number[]) =>
+    createMockData(ids.map((id) => ({ id, itemType: "type1" })));
+
+  // Wide engaged range first (e.g. after a fling), then a narrower one for the
+  // same data (the list came to rest or its viewport shrank), then the data changes.
+  const syncWideNarrowThenChange = (
+    after: number[],
+    wide: [number, number],
+    narrow: [number, number]
+  ) => {
+    const rsm = new RenderStackManager();
+    const before = toMock(range(40));
+    runSyncAndGetEntireKeyMapKeys(
+      rsm,
+      before,
+      new ConsecutiveNumbers(wide[0], wide[1])
+    );
+    runSyncAndGetEntireKeyMapKeys(
+      rsm,
+      before,
+      new ConsecutiveNumbers(narrow[0], narrow[1])
+    );
+    const changed = toMock(after);
+    // engaged indices never go past the data (the layout is built from it)
+    const lastIndex = changed.length - 1;
+    const engaged = new ConsecutiveNumbers(
+      Math.min(narrow[0], lastIndex),
+      Math.min(narrow[1], lastIndex)
+    );
+    runSyncAndGetEntireKeyMapKeys(rsm, changed, engaged);
+    return { rsm, changed, engaged };
+  };
+
+  const expectOneKeyPerIndexMatchingData = (
+    rsm: RenderStackManager,
+    mock: ReturnType<typeof toMock>,
+    engaged: ConsecutiveNumbers
+  ) => {
+    const keysByIndex = new Map<number, string[]>();
+    rsm.getRenderStack().forEach((info, key) => {
+      keysByIndex.set(info.index, [
+        ...(keysByIndex.get(info.index) ?? []),
+        key,
+      ]);
+      if (info.index < mock.length) {
+        expect(info.stableId).toBe(mock.getStableId(info.index));
+      }
+    });
+    keysByIndex.forEach((keys) => expect(keys).toHaveLength(1));
+    for (const index of engaged) {
+      expect(keysByIndex.get(index)).toHaveLength(1);
+    }
+    // stableIdMap must agree with the render stack in both directions
+    const { stableIdMap } = rsm as unknown as {
+      stableIdMap: Map<string, string>;
+    };
+    rsm.getRenderStack().forEach((info, key) => {
+      expect(stableIdMap.get(info.stableId)).toBe(key);
+    });
+    stableIdMap.forEach((key, stableId) => {
+      expect(rsm.getRenderStack().get(key)?.stableId).toBe(stableId);
+    });
+  };
+
+  // Repro cases: each of these fails without the fix.
+  it.each([
+    ["reversed", range(40).reverse()],
+    ["without the first 5 items", range(40).slice(5)],
+    ["filtered to even ids", range(40).filter((id) => id % 2 === 0)],
+  ])(
+    "should keep one key per index when the data is %s",
+    (_label, afterIds) => {
+      const { rsm, changed, engaged } = syncWideNarrowThenChange(
+        afterIds,
+        [10, 29],
+        [14, 22]
+      );
+      expectOneKeyPerIndexMatchingData(rsm, changed, engaged);
+    }
+  );
+
+  it("should keep one key per index when the data is rotated", () => {
+    const afterIds = [...range(40).slice(7), ...range(40).slice(0, 7)];
+    const { rsm, changed, engaged } = syncWideNarrowThenChange(
+      afterIds,
+      [0, 19],
+      [0, 8]
+    );
+    expectOneKeyPerIndexMatchingData(rsm, changed, engaged);
+  });
+
+  // Control: passes with or without the fix, the bug needs a narrower range.
+  it("should stay consistent when the engaged range never narrows (control)", () => {
+    const { rsm, changed, engaged } = syncWideNarrowThenChange(
+      range(40).reverse(),
+      [10, 29],
+      [10, 29]
+    );
+    expectOneKeyPerIndexMatchingData(rsm, changed, engaged);
+  });
+});

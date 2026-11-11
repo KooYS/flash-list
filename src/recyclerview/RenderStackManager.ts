@@ -159,8 +159,10 @@ export class RenderStackManager {
           const nextItemType = getItemType(nextIndex);
           const nextStableId = getStableId(nextIndex);
           if (itemType === nextItemType) {
-            this.syncItem(nextIndex, nextItemType, nextStableId);
-            shouldDeleteKey = false;
+            // syncItem prefers the key already mapped to nextStableId, which
+            // may not be this one. Only keep this key if it was the one reused.
+            shouldDeleteKey =
+              this.syncItem(nextIndex, nextItemType, nextStableId) !== key;
           }
         }
         if (shouldDeleteKey) {
