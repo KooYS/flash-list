@@ -641,18 +641,20 @@ describe("RenderStackManager with recycled keys outside the engaged range", () =
 
   // Repro cases: each of these fails without the fix.
   it.each([
-    ["reversed", range(40).reverse()],
-    ["without the first 5 items", range(40).slice(5)],
-    ["filtered to even ids", range(40).filter((id) => id % 2 === 0)],
+    ["reversed", range(40).reverse(), 19],
+    ["without the first 5 items", range(40).slice(5), 18],
+    ["filtered to even ids", range(40).filter((id) => id % 2 === 0), 10],
   ])(
     "should keep one key per index when the data is %s",
-    (_label, afterIds) => {
+    (_label, afterIds, keptKeys) => {
       const { rsm, changed, engaged } = syncWideNarrowThenChange(
         afterIds,
         [10, 29],
         [14, 22]
       );
       expectOneKeyPerIndexMatchingData(rsm, changed, engaged);
+      // only the stale keys that were not reused are dropped
+      expect(rsm.getRenderStack().size).toBe(keptKeys);
     }
   );
 
